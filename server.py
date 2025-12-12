@@ -3,7 +3,7 @@ import requests
 import os
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load .env variables
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_30a")
@@ -11,14 +11,12 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 app = Flask(__name__)
 
-
 # Test homepage
 @app.route("/", methods=["GET"])
 def home():
     return "Server is running", 200
 
-
-# Send message to Telegram
+# Telegram sender
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
@@ -27,7 +25,6 @@ def send_telegram_message(text):
         "parse_mode": "HTML",
     }
     requests.post(url, data=payload)
-
 
 # Webhook endpoint
 @app.route("/webhook", methods=["POST"])
@@ -53,6 +50,18 @@ def webhook():
 
     return "OK", 200
 
-
+# ------------ MAIN ENTRY POINT FOR VPS ------------
 if __name__ == "__main__":
-    app.run(port=5000, debug=True)
+    # Detect public IP (auto)
+    try:
+        public_ip = requests.get("https://api.ipify.org").text
+    except:
+        public_ip = "UNKNOWN"
+
+    print("\n==============================")
+    print(" Public IP:", public_ip)
+    print(" Webhook URL: http://" + public_ip + ":5000/webhook")
+    print("==============================\n")
+
+    # Run server publicly on VPS
+    app.run(host="0.0.0.0", port=5000, debug=True)
