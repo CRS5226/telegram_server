@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, BackgroundTasks
 import requests
 import yfinance as yf
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 import uvicorn
 
@@ -10,28 +11,26 @@ load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_30a")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-SYMBOL = "RELIANCE.NS"  # change for your testing
+SYMBOL = "RELIANCE.NS"  # You can change this for testing
 
 app = FastAPI()
 
 
-# ==============================
-# Send Telegram Message (async ready)
-# ==============================
+# ============================================
+# Send Telegram Message (Non-blocking)
+# ============================================
 def send_telegram_message(text: str):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
-
-    # Non-blocking fast API call
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
     try:
         requests.post(url, data=payload, timeout=2)
     except:
         pass
 
 
-# ==============================
+# ============================================
 # FAST Yahoo Live Price
-# ==============================
+# ============================================
 def get_live_price():
     try:
         data = yf.download(SYMBOL, period="1d", interval="1m", progress=False)
@@ -40,49 +39,76 @@ def get_live_price():
         return 0.0
 
 
-# ==============================
-# HOME
-# ==============================
+# ============================================
+# HOME CHECK
+# ============================================
 @app.get("/")
 def home():
     return {"status": "Server is running"}
 
 
-# ==============================
-# WEBHOOK (non-blocking)
-# ==============================
+# ============================================
+# WEBHOOK (NON-BLOCKING)
+# ============================================
 @app.post("/webhook")
 async def webhook(request: Request, background: BackgroundTasks):
 
-    body = await request.body()
-    signal = body.decode("utf-8").strip().upper()
+    body = (await request.body()).decode("utf-8").strip().upper()
 
-    # Fetch price fast (sync but lightweight)
+    # LIVE MARKET PRICE
     price = get_live_price()
-    atr = 1.5
-    entry = price
 
-    if signal == "TEST_BUY":
-        sl = entry - atr
-        tp = entry + 2 * atr
-        msg = f"<b>BUY SIGNAL</b>\nEntry: {entry}\nTarget: {tp}\nStoploss: {sl}"
+    # Our test logic: entry/target/stoploss offsets
+    entry = price + 100
+    target = price + 500
+    stop = price - 100
+
+    # Percentage differences
+    target_diff = ((target - entry) / entry) * 100
+    stop_diff = ((entry - stop) / entry) * 100
+
+    # Timestamp
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timeframe = "30min"
+
+    # ==========================
+    # Handle BUY / SELL Signals
+    # ==========================
+    if body == "BUY":
+        msg = (
+            f"🚀 *BUY SIGNAL*\n"
+            f"Symbol: `{SYMBOL}`\n"
+            f"Timeframe: `{timeframe}`\n"
+            f"Timestamp: `{timestamp}`\n"
+            f"Live Price: `{price}`\n\n"
+            f"🎯 Entry: `{entry}` | Target: `{target}` | Stoploss: `{stop}`\n"
+            f"📈 Target Diff: `{target_diff:.2f}%`\n"
+            f"📉 Stoploss Diff: `{stop_diff:.2f}%`"
+        )
         background.add_task(send_telegram_message, msg)
 
-    elif signal == "TEST_SELL":
-        sl = entry + atr
-        tp = entry - 2 * atr
-        msg = f"<b>SELL SIGNAL</b>\nEntry: {entry}\nTarget: {tp}\nStoploss: {sl}"
+    elif body == "SELL":
+        msg = (
+            f"🔻 *SELL SIGNAL*\n"
+            f"Symbol: `{SYMBOL}`\n"
+            f"Timeframe: `{timeframe}`\n"
+            f"Timestamp: `{timestamp}`\n"
+            f"Live Price: `{price}`\n\n"
+            f"🎯 Entry: `{entry}` | Target: `{target}` | Stoploss: `{stop}`\n"
+            f"📈 Target Diff: `{target_diff:.2f}%`\n"
+            f"📉 Stoploss Diff: `{stop_diff:.2f}%`"
+        )
         background.add_task(send_telegram_message, msg)
 
     else:
-        background.add_task(send_telegram_message, f"Unknown: {signal}")
+        background.add_task(send_telegram_message, f"`Unknown` signal received: {body}")
 
     return {"status": "ok"}
 
 
-# ==============================
-# SERVER STARTUP WITH PUBLIC IP PRINT
-# ==============================
+# ============================================
+# SERVER STARTUP
+# ============================================
 if __name__ == "__main__":
     public_ip = requests.get("https://api.ipify.org").text
     print("\n==============================")
