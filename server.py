@@ -1,88 +1,93 @@
-from flask import Flask, request
+from fastapi import FastAPI, Request, BackgroundTasks
 import requests
-import os
 import yfinance as yf
+import os
 from dotenv import load_dotenv
+import uvicorn
 
-# Load environment variables
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_30a")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# SYMBOL to fetch in real-time (you can later pass symbol through webhook)
-SYMBOL = "RELIANCE.NS"   # CHANGE THIS TO YOUR STOCK
+SYMBOL = "RELIANCE.NS"  # change for your testing
 
-app = Flask(__name__)
+app = FastAPI()
 
-# Homepage
-@app.route("/", methods=["GET"])
-def home():
-    return "Server is running", 200
 
-# Telegram sender
-def send_telegram_message(text):
+# ==============================
+# Send Telegram Message (async ready)
+# ==============================
+def send_telegram_message(text: str):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-    requests.post(url, data=payload)
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
 
-# Fetch live 1-minute candle price
-def get_live_price():
-    ticker = yf.Ticker(SYMBOL)
-    data = ticker.history(period="1d", interval="1m")  # CORRECT FORMAT
-
-    if data.empty:
-        raise Exception("No live data received from YFinance!")
-
-    return float(data["Close"].iloc[-1])
-
-# Webhook
-@app.route("/webhook", methods=["POST"])
-def webhook():
-
-    raw = request.get_data(as_text=True).strip()
-    signal = raw.upper()  # Example: "TEST_BUY"
-
+    # Non-blocking fast API call
     try:
-        price = get_live_price()
-    except Exception as e:
-        send_telegram_message(f"Error fetching price: {str(e)}")
-        return "Price error", 500
+        requests.post(url, data=payload, timeout=2)
+    except:
+        pass
 
-    # Placeholder ATR for now — we can compute real ATR later
+
+# ==============================
+# FAST Yahoo Live Price
+# ==============================
+def get_live_price():
+    try:
+        data = yf.download(SYMBOL, period="1d", interval="1m", progress=False)
+        return float(data["Close"].iloc[-1])
+    except:
+        return 0.0
+
+
+# ==============================
+# HOME
+# ==============================
+@app.get("/")
+def home():
+    return {"status": "Server is running"}
+
+
+# ==============================
+# WEBHOOK (non-blocking)
+# ==============================
+@app.post("/webhook")
+async def webhook(request: Request, background: BackgroundTasks):
+
+    body = await request.body()
+    signal = body.decode("utf-8").strip().upper()
+
+    # Fetch price fast (sync but lightweight)
+    price = get_live_price()
     atr = 1.5
     entry = price
 
     if signal == "TEST_BUY":
         sl = entry - atr
-        tp = entry + (2 * atr)
-        send_telegram_message(
-            f"<b>BUY SIGNAL</b>\nEntry: {entry}\nTarget: {tp}\nStoploss: {sl}"
-        )
+        tp = entry + 2 * atr
+        msg = f"<b>BUY SIGNAL</b>\nEntry: {entry}\nTarget: {tp}\nStoploss: {sl}"
+        background.add_task(send_telegram_message, msg)
 
     elif signal == "TEST_SELL":
         sl = entry + atr
-        tp = entry - (2 * atr)
-        send_telegram_message(
-            f"<b>SELL SIGNAL</b>\nEntry: {entry}\nTarget: {tp}\nStoploss: {sl}"
-        )
+        tp = entry - 2 * atr
+        msg = f"<b>SELL SIGNAL</b>\nEntry: {entry}\nTarget: {tp}\nStoploss: {sl}"
+        background.add_task(send_telegram_message, msg)
 
     else:
-        send_telegram_message(f"Unknown Payload Received:\n{raw}")
+        background.add_task(send_telegram_message, f"Unknown: {signal}")
 
-    return "OK", 200
+    return {"status": "ok"}
 
-# Run server publicly
+
+# ==============================
+# SERVER STARTUP WITH PUBLIC IP PRINT
+# ==============================
 if __name__ == "__main__":
     public_ip = requests.get("https://api.ipify.org").text
-
     print("\n==============================")
     print(" Public IP:", public_ip)
     print(" Webhook URL: http://" + public_ip + ":5000/webhook")
     print("==============================\n")
 
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    uvicorn.run(app, host="0.0.0.0", port=5000)
