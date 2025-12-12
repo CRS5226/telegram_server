@@ -3,6 +3,7 @@ import requests
 import os
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_30a")
@@ -10,41 +11,64 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 app = Flask(__name__)
 
+# Test homepage
 @app.route("/", methods=["GET"])
 def home():
     return "Server is running", 200
 
+# Send Telegram message
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+    }
     requests.post(url, data=payload)
 
+# Webhook endpoint
 @app.route("/webhook", methods=["POST"])
 def webhook():
 
-    # First try JSON
-    data = request.get_json(silent=True)
+    # Accept ANY data format (JSON or raw)
+    raw = request.get_data(as_text=True)
 
-    # If not JSON, fallback to raw body
-    if data is None:
-        raw = request.data.decode("utf-8")
-        data = {"signal": raw}
+    # Expected format: "143.25,TEST_BUY"
+    parts = raw.split(",")
 
-    signal = data.get("signal", "UNKNOWN")
+    if len(parts) < 2:
+        send_telegram_message(f"Invalid payload received: {raw}")
+        return "Invalid", 400
+
+    price = float(parts[0])
+    signal = parts[1].strip()
+
+    # ATR placeholder for testing — replace later with real formula
+    atr = 1.5
+
+    entry = price
 
     if signal == "TEST_BUY":
-        send_telegram_message("<b>BUY SIGNAL</b>\nEntry: 100.5\nTarget: 102.5\nStoploss: 99.2")
+        sl = entry - atr
+        tp = entry + 2 * atr
+        send_telegram_message(
+            f"<b>BUY SIGNAL</b>\nEntry: {entry}\nTarget: {tp}\nStoploss: {sl}"
+        )
 
     elif signal == "TEST_SELL":
-        send_telegram_message("<b>SELL SIGNAL</b>\nEntry: 100.5\nTarget: 98.2\nStoploss: 101.1")
+        sl = entry + atr
+        tp = entry - 2 * atr
+        send_telegram_message(
+            f"<b>SELL SIGNAL</b>\nEntry: {entry}\nTarget: {tp}\nStoploss: {sl}"
+        )
 
     else:
-        send_telegram_message(f"Unknown Signal Received:\n{data}")
+        send_telegram_message(f"Unknown Signal Received:\n{raw}")
 
     return "OK", 200
 
+# Run server on VPS
 if __name__ == "__main__":
-
     try:
         public_ip = requests.get("https://api.ipify.org").text
     except:
